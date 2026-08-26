@@ -42,6 +42,7 @@ def test_create_booking_is_idempotent():
 
     assert first.status_code == 200
     assert second.status_code == 200
+    assert first.json()["operation_id"].startswith("booking-")
     assert first.json()["data"]["booking"]["booking_id"] == second.json()["data"]["booking"]["booking_id"]
 
 

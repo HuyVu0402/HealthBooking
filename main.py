@@ -95,8 +95,16 @@ BOOKINGS: dict[str, dict[str, Any]] = {}
 IDEMPOTENCY_RESULTS: dict[str, dict[str, Any]] = {}
 
 
-def envelope(status: Literal["success", "error"], message: str, data: Any = None, code: str | None = None) -> dict[str, Any]:
+def envelope(
+    status: Literal["success", "error"],
+    message: str,
+    data: Any = None,
+    code: str | None = None,
+    operation_id: str | None = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {"status": status, "message": message}
+    if operation_id:
+        result["operation_id"] = operation_id
     if data is not None:
         result["data"] = data
     if code:
@@ -104,8 +112,9 @@ def envelope(status: Literal["success", "error"], message: str, data: Any = None
     return result
 
 
-def ok(data: Any, message: str) -> dict[str, Any]:
-    return envelope("success", message, data)
+def ok(data: Any, message: str, operation_id: str | None = None) -> dict[str, Any]:
+    operation_id = operation_id or f"health-operation-{uuid4().hex[:12].upper()}"
+    return envelope("success", message, data, operation_id=operation_id)
 
 
 def error(message: str, code: str, data: Any = None) -> dict[str, Any]:
@@ -271,7 +280,11 @@ async def create_booking(payload: BookingRequest, idempotency_key: str | None = 
     }
     BOOKINGS[booking_id] = booking
     slot["booked"] += 1
-    response = ok({"booking": booking_view(booking)}, "Đặt lịch khám thành công")
+    response = ok(
+        {"booking": booking_view(booking)},
+        "Đặt lịch khám thành công",
+        operation_id=f"booking-{booking_id}",
+    )
     IDEMPOTENCY_RESULTS[idempotency_key] = response
     return response
 
@@ -299,7 +312,11 @@ async def cancel_booking(payload: CancelRequest, booking_id: str = Path(..., des
     if booking["status"] != "CANCELLED":
         SLOTS[booking["slot_id"]]["booked"] -= 1
         booking.update(status="CANCELLED", cancel_reason=payload.reason, cancelled_at=datetime.now(timezone.utc).isoformat())
-    response = ok({"booking": booking_view(booking)}, "Hủy lịch khám thành công")
+    response = ok(
+        {"booking": booking_view(booking)},
+        "Hủy lịch khám thành công",
+        operation_id=f"booking-{booking_id}",
+    )
     IDEMPOTENCY_RESULTS[cache_key] = response
     return response
 
@@ -327,6 +344,10 @@ async def reschedule_booking(payload: RescheduleRequest, booking_id: str = Path(
         SLOTS[booking["slot_id"]]["booked"] -= 1
         new_slot["booked"] += 1
         booking.update(slot_id=payload.new_slot_id, rescheduled_at=datetime.now(timezone.utc).isoformat())
-    response = ok({"booking": booking_view(booking)}, "Đổi ca khám thành công")
+    response = ok(
+        {"booking": booking_view(booking)},
+        "Đổi ca khám thành công",
+        operation_id=f"booking-{booking_id}",
+    )
     IDEMPOTENCY_RESULTS[cache_key] = response
     return response
