@@ -1,0 +1,692 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Health Booking Mini App",
+    "description": "Mini-app demo đặt, đổi và hủy lịch khám; dữ liệu lưu tạm trong bộ nhớ.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Kiểm tra Health Booking",
+        "operationId": "health_booking_status",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Booking Status"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "low",
+        "x-side-effect-type": "read"
+      }
+    },
+    "/doctors": {
+      "get": {
+        "summary": "Tìm bác sĩ theo chuyên khoa",
+        "description": "Dùng khi người dùng muốn xem hoặc tìm bác sĩ phù hợp.",
+        "operationId": "list_clinic_doctors",
+        "parameters": [
+          {
+            "name": "specialty",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Chuyên khoa cần tìm, ví dụ: Nội tổng quát, Nhi khoa, Mắt, Tai Mũi Họng",
+              "title": "Specialty"
+            },
+            "description": "Chuyên khoa cần tìm, ví dụ: Nội tổng quát, Nhi khoa, Mắt, Tai Mũi Họng"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Clinic Doctors"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "low",
+        "x-side-effect-type": "read"
+      }
+    },
+    "/slots": {
+      "get": {
+        "summary": "Tìm ca khám còn chỗ",
+        "description": "Dùng khi người dùng đã chọn bác sĩ hoặc ngày khám và muốn xem ca còn trống.",
+        "operationId": "search_clinic_slots",
+        "parameters": [
+          {
+            "name": "doctor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Mã bác sĩ cần xem lịch",
+              "title": "Doctor Id"
+            },
+            "description": "Mã bác sĩ cần xem lịch"
+          },
+          {
+            "name": "appointment_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Ngày muốn khám theo định dạng YYYY-MM-DD",
+              "title": "Appointment Date"
+            },
+            "description": "Ngày muốn khám theo định dạng YYYY-MM-DD"
+          },
+          {
+            "name": "available_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Chỉ trả về ca còn chỗ",
+              "default": true,
+              "title": "Available Only"
+            },
+            "description": "Chỉ trả về ca còn chỗ"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Search Clinic Slots"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "low",
+        "x-side-effect-type": "read"
+      }
+    },
+    "/bookings": {
+      "post": {
+        "summary": "Đặt lịch khám sau khi người dùng xác nhận",
+        "description": "Dùng khi người dùng đã chọn bác sĩ, ca khám và cung cấp thông tin bệnh nhân.",
+        "operationId": "create_clinic_booking",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Clinic Booking"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "high",
+        "x-side-effect-type": "mutation",
+        "x-requires-hitl": true,
+        "x-idempotency-required": true,
+        "x-retry-policy": "no_retry",
+        "x-deep-link-template": "https://healthbooking.onrender.com/?booking_id={booking_id}"
+      }
+    },
+    "/bookings/{booking_id}": {
+      "get": {
+        "summary": "Xem thông tin lịch khám",
+        "description": "Dùng khi người dùng muốn kiểm tra lịch khám đã đặt.",
+        "operationId": "get_clinic_booking",
+        "parameters": [
+          {
+            "name": "booking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Mã lịch khám cần xem",
+              "title": "Booking Id"
+            },
+            "description": "Mã lịch khám cần xem"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Clinic Booking"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "low",
+        "x-side-effect-type": "read"
+      }
+    },
+    "/bookings/{booking_id}/cancel": {
+      "post": {
+        "summary": "Hủy lịch khám sau khi người dùng xác nhận",
+        "description": "Dùng khi người dùng muốn hủy lịch khám đã đặt.",
+        "operationId": "cancel_clinic_booking",
+        "parameters": [
+          {
+            "name": "booking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Mã lịch khám cần hủy",
+              "title": "Booking Id"
+            },
+            "description": "Mã lịch khám cần hủy"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Cancel Clinic Booking"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "high",
+        "x-side-effect-type": "mutation",
+        "x-requires-hitl": true,
+        "x-idempotency-required": true,
+        "x-retry-policy": "no_retry"
+      }
+    },
+    "/bookings/{booking_id}/reschedule": {
+      "post": {
+        "summary": "Đổi ca khám sau khi người dùng xác nhận",
+        "description": "Dùng khi người dùng muốn chuyển lịch hiện tại sang một ca khác của cùng bác sĩ.",
+        "operationId": "reschedule_clinic_booking",
+        "parameters": [
+          {
+            "name": "booking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Mã lịch khám cần đổi",
+              "title": "Booking Id"
+            },
+            "description": "Mã lịch khám cần đổi"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescheduleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Reschedule Clinic Booking"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "high",
+        "x-side-effect-type": "mutation",
+        "x-requires-hitl": true,
+        "x-idempotency-required": true,
+        "x-retry-policy": "no_retry"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BookingRequest": {
+        "properties": {
+          "doctor_id": {
+            "type": "string",
+            "title": "Doctor Id",
+            "description": "Mã bác sĩ được chọn"
+          },
+          "slot_id": {
+            "type": "string",
+            "title": "Slot Id",
+            "description": "Mã ca khám còn chỗ được chọn"
+          },
+          "patient_name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 2,
+            "title": "Patient Name",
+            "description": "Họ tên người đi khám"
+          },
+          "patient_phone": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 8,
+            "title": "Patient Phone",
+            "description": "Số điện thoại liên hệ"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 3,
+            "title": "Reason",
+            "description": "Lý do hoặc triệu chứng cần khám"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Customer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hồ sơ người dùng do Super App tự đính kèm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "doctor_id",
+          "slot_id",
+          "patient_name",
+          "patient_phone",
+          "reason"
+        ],
+        "title": "BookingRequest"
+      },
+      "CancelRequest": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Lý do hủy lịch khám"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Customer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hồ sơ người dùng do Super App tự đính kèm"
+          }
+        },
+        "type": "object",
+        "title": "CancelRequest"
+      },
+      "Customer": {
+        "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name",
+            "description": "Tên khách hàng do Super App cung cấp"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Email khách hàng do Super App cung cấp"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username",
+            "description": "Tên đăng nhập do Super App cung cấp"
+          }
+        },
+        "type": "object",
+        "title": "Customer"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "RescheduleRequest": {
+        "properties": {
+          "new_slot_id": {
+            "type": "string",
+            "title": "New Slot Id",
+            "description": "Mã ca khám mới còn chỗ của cùng bác sĩ"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Customer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hồ sơ người dùng do Super App tự đính kèm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_slot_id"
+        ],
+        "title": "RescheduleRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://healthbooking.onrender.com"
+    }
+  ]
+}
