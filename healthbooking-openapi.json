@@ -2,9 +2,14 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Health Booking Mini App",
-    "description": "Mini-app demo đặt, đổi và hủy lịch khám; dữ liệu lưu tạm trong bộ nhớ.",
+    "description": "Mini-app demo tra cứu bác sĩ, đặt, đổi, thanh toán và hủy lịch khám; dữ liệu lưu tạm trong bộ nhớ.",
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "https://healthbooking.onrender.com"
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
@@ -30,10 +35,46 @@
     },
     "/doctors": {
       "get": {
-        "summary": "Tìm bác sĩ theo chuyên khoa",
-        "description": "Dùng khi người dùng muốn xem hoặc tìm bác sĩ phù hợp.",
+        "summary": "Lấy thông tin bác sĩ theo ID, tên hoặc chuyên khoa",
+        "description": "Chức năng 1: Lấy tên/ID theo ID hoặc tên bác sĩ hoặc chuyên khoa.",
         "operationId": "list_clinic_doctors",
         "parameters": [
+          {
+            "name": "doctor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Mã bác sĩ cần tìm (VD: DOC-NOI-01)",
+              "title": "Doctor Id"
+            },
+            "description": "Mã bác sĩ cần tìm (VD: DOC-NOI-01)"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tên bác sĩ cần tìm (VD: Nguyễn Minh Anh hoặc Minh Anh)",
+              "title": "Name"
+            },
+            "description": "Tên bác sĩ cần tìm (VD: Nguyễn Minh Anh hoặc Minh Anh)"
+          },
           {
             "name": "specialty",
             "in": "query",
@@ -47,10 +88,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Chuyên khoa cần tìm, ví dụ: Nội tổng quát, Nhi khoa, Mắt, Tai Mũi Họng",
+              "description": "Chuyên khoa cần tìm (VD: Nội tổng quát, Nhi khoa, Mắt, Tai Mũi Họng)",
               "title": "Specialty"
             },
-            "description": "Chuyên khoa cần tìm, ví dụ: Nội tổng quát, Nhi khoa, Mắt, Tai Mũi Họng"
+            "description": "Chuyên khoa cần tìm (VD: Nội tổng quát, Nhi khoa, Mắt, Tai Mũi Họng)"
           }
         ],
         "responses": {
@@ -83,8 +124,8 @@
     },
     "/slots": {
       "get": {
-        "summary": "Tìm ca khám còn chỗ",
-        "description": "Dùng khi người dùng đã chọn bác sĩ hoặc ngày khám và muốn xem ca còn trống.",
+        "summary": "Lấy ra lịch khám của bác sĩ theo ID hoặc tên bác sĩ",
+        "description": "Chức năng 2: Lấy ra lịch khám của 1 bác sĩ theo ID hoặc theo tên bác sĩ.",
         "operationId": "search_clinic_slots",
         "parameters": [
           {
@@ -100,10 +141,28 @@
                   "type": "null"
                 }
               ],
-              "description": "Mã bác sĩ cần xem lịch",
+              "description": "Mã bác sĩ cần xem lịch (VD: DOC-NOI-01)",
               "title": "Doctor Id"
             },
-            "description": "Mã bác sĩ cần xem lịch"
+            "description": "Mã bác sĩ cần xem lịch (VD: DOC-NOI-01)"
+          },
+          {
+            "name": "doctor_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tên bác sĩ cần xem lịch (VD: BS. Nguyễn Minh Anh hoặc Minh Anh)",
+              "title": "Doctor Name"
+            },
+            "description": "Tên bác sĩ cần xem lịch (VD: BS. Nguyễn Minh Anh hoặc Minh Anh)"
           },
           {
             "name": "appointment_date",
@@ -167,8 +226,8 @@
     },
     "/bookings": {
       "post": {
-        "summary": "Đặt lịch khám sau khi người dùng xác nhận",
-        "description": "Dùng khi người dùng đã chọn bác sĩ, ca khám và cung cấp thông tin bệnh nhân.",
+        "summary": "Đặt lịch khám theo bác sĩ (Khởi tạo trạng thái Chờ thanh toán)",
+        "description": "Chức năng 3: Đặt lịch khám theo ID/tên bác sĩ và ca khám. Ban đầu trạng thái là PENDING_PAYMENT (Đặt thành công - Chưa thanh toán).",
         "operationId": "create_clinic_booking",
         "parameters": [
           {
@@ -243,13 +302,191 @@
         "x-requires-hitl": true,
         "x-idempotency-required": true,
         "x-retry-policy": "no_retry",
-        "x-deep-link-template": "https://healthbooking.onrender.com/?booking_id={booking_id}"
+        "x-deep-link-template": "http://localhost:8502/?booking_id={booking_id}"
+      },
+      "get": {
+        "summary": "Tìm kiếm thông tin lịch khám bệnh",
+        "description": "Chức năng 6: Lấy danh sách hoặc tìm kiếm lịch khám theo SĐT, tên bệnh nhân hoặc ID bác sĩ.",
+        "operationId": "search_clinic_bookings",
+        "parameters": [
+          {
+            "name": "patient_phone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Số điện thoại bệnh nhân",
+              "title": "Patient Phone"
+            },
+            "description": "Số điện thoại bệnh nhân"
+          },
+          {
+            "name": "patient_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tên bệnh nhân",
+              "title": "Patient Name"
+            },
+            "description": "Tên bệnh nhân"
+          },
+          {
+            "name": "doctor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Mã bác sĩ",
+              "title": "Doctor Id"
+            },
+            "description": "Mã bác sĩ"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Search Clinic Bookings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "low",
+        "x-side-effect-type": "read"
+      }
+    },
+    "/bookings/{booking_id}/pay": {
+      "post": {
+        "summary": "Xác nhận thanh toán cho lịch khám",
+        "description": "Dùng khi người dùng ấn nút thanh toán hoặc khi nhận callback/thông báo thanh toán thành công từ Super App.",
+        "operationId": "pay_clinic_booking",
+        "parameters": [
+          {
+            "name": "booking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Mã lịch khám cần thanh toán",
+              "title": "Booking Id"
+            },
+            "description": "Mã lịch khám cần thanh toán"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Pay Clinic Booking"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-risk-level": "high",
+        "x-side-effect-type": "mutation",
+        "x-requires-hitl": true,
+        "x-idempotency-required": true,
+        "x-retry-policy": "no_retry"
       }
     },
     "/bookings/{booking_id}": {
       "get": {
-        "summary": "Xem thông tin lịch khám",
-        "description": "Dùng khi người dùng muốn kiểm tra lịch khám đã đặt.",
+        "summary": "Xem thông tin chi tiết lịch khám bệnh",
+        "description": "Chức năng 6: Lấy thông tin lịch khám bệnh theo mã lịch khám.",
         "operationId": "get_clinic_booking",
         "parameters": [
           {
@@ -294,8 +531,8 @@
     },
     "/bookings/{booking_id}/cancel": {
       "post": {
-        "summary": "Hủy lịch khám sau khi người dùng xác nhận",
-        "description": "Dùng khi người dùng muốn hủy lịch khám đã đặt.",
+        "summary": "Hủy lịch khám",
+        "description": "Chức năng 5: Hủy lịch khám đã đặt.",
         "operationId": "cancel_clinic_booking",
         "parameters": [
           {
@@ -385,8 +622,8 @@
     },
     "/bookings/{booking_id}/reschedule": {
       "post": {
-        "summary": "Đổi ca khám sau khi người dùng xác nhận",
-        "description": "Dùng khi người dùng muốn chuyển lịch hiện tại sang một ca khác của cùng bác sĩ.",
+        "summary": "Đổi thông tin và ca khám của lịch khám",
+        "description": "Chức năng 4: Đổi ca khám hoặc đổi thông tin bệnh nhân/lý do của lịch khám.",
         "operationId": "reschedule_clinic_booking",
         "parameters": [
           {
@@ -480,14 +717,64 @@
       "BookingRequest": {
         "properties": {
           "doctor_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Doctor Id",
-            "description": "Mã bác sĩ được chọn"
+            "description": "Mã bác sĩ được chọn (có thể chọn theo doctor_id hoặc doctor_name)"
+          },
+          "doctor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doctor Name",
+            "description": "Tên bác sĩ (nếu không cung cấp doctor_id)"
           },
           "slot_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Slot Id",
-            "description": "Mã ca khám còn chỗ được chọn"
+            "description": "Mã ca khám còn chỗ"
+          },
+          "appointment_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Appointment Date",
+            "description": "Ngày khám YYYY-MM-DD (nếu không dùng slot_id)"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time",
+            "description": "Giờ bắt đầu HH:MM (nếu không dùng slot_id)"
           },
           "patient_name": {
             "type": "string",
@@ -524,8 +811,6 @@
         },
         "type": "object",
         "required": [
-          "doctor_id",
-          "slot_id",
           "patient_name",
           "patient_phone",
           "reason"
@@ -617,12 +902,20 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
-      "RescheduleRequest": {
+      "PayRequest": {
         "properties": {
-          "new_slot_id": {
-            "type": "string",
-            "title": "New Slot Id",
-            "description": "Mã ca khám mới còn chỗ của cùng bác sĩ"
+          "payment_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Method",
+            "description": "Phương thức thanh toán (VD: SUPERAPP_PAY, WALLET, CARD)",
+            "default": "SUPERAPP_PAY"
           },
           "customer": {
             "anyOf": [
@@ -637,9 +930,77 @@
           }
         },
         "type": "object",
-        "required": [
-          "new_slot_id"
-        ],
+        "title": "PayRequest"
+      },
+      "RescheduleRequest": {
+        "properties": {
+          "new_slot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Slot Id",
+            "description": "Mã ca khám mới còn chỗ của cùng bác sĩ"
+          },
+          "patient_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patient Name",
+            "description": "Cập nhật họ tên người đi khám mới"
+          },
+          "patient_phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20,
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patient Phone",
+            "description": "Cập nhật số điện thoại mới"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Cập nhật lý do hoặc triệu chứng cần khám"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Customer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hồ sơ người dùng do Super App tự đính kèm"
+          }
+        },
+        "type": "object",
         "title": "RescheduleRequest"
       },
       "ValidationError": {
@@ -683,10 +1044,5 @@
         "title": "ValidationError"
       }
     }
-  },
-  "servers": [
-    {
-      "url": "https://healthbooking.onrender.com"
-    }
-  ]
+  }
 }

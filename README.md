@@ -1,35 +1,36 @@
 # HealthBooking
 
-Mini-app đặt lịch khám đơn giản, chạy bằng FastAPI. Backend API và UI cơ bản nằm chung trong `main.py`.
+Mini-app đặt lịch khám bệnh tích hợp Super App, hỗ trợ 6 chức năng cơ bản, luồng thanh toán và giao diện Deep Link. Backend API và UI demo chạy bằng FastAPI trong `main.py`.
 
-## Chạy bằng Git Bash
+## Các chức năng chính & Luồng Thanh Toán
+
+1. **Lấy tên/ID theo ID hoặc tên bác sĩ**: `GET /doctors`
+2. **Lấy ra lịch khám của 1 bác sĩ theo ID hoặc theo tên**: `GET /slots`
+3. **Đặt lịch khám theo bác sĩ**: `POST /bookings` (Trạng thái ban đầu: `PENDING_PAYMENT` - Đặt thành công chưa thanh toán)
+4. **Luồng Thanh Toán / Deep Link**:
+   - Truy cập Deep Link `/?booking_id={booking_id}` hiển thị màn hình **"Đặt lịch thành công - Chưa thanh toán"** kèm nút **"Thanh toán ngay"**.
+   - Ấn nút hoặc nhận callback `POST /bookings/{booking_id}/pay` chuyển trạng thái sang **"Thanh toán thành công"** (`PAID`).
+5. **Đổi thông tin của lịch khám đó**: `POST /bookings/{booking_id}/reschedule`
+6. **Hủy lịch khám**: `POST /bookings/{booking_id}/cancel`
+7. **Lấy thông tin lịch khám bệnh**: `GET /bookings/{booking_id}` & `GET /bookings`
+
+## Chạy ứng dụng
 
 ```bash
 cd /d/CODE/AITHUCCHIEN/miniapp/HealthBooking
-python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
-./.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8502
+python -m uvicorn main:app --host 127.0.0.1 --port 8502
+```
+
+Chạy test suite:
+
+```bash
+pytest tests/test_app.py -v
 ```
 
 Mở:
 
-- UI: <http://127.0.0.1:8502/>
-- Swagger: <http://127.0.0.1:8502/docs>
-- Health: <http://127.0.0.1:8502/health>
-
-## Thông tin đăng ký Super App
-
-- `service_code`: `HEALTH_BOOKING`
-- `name`: `Health Booking`
-- `category`: `HEALTHCARE`
-- `base_url`: `http://localhost:8502`
-- `health_check_url`: `http://localhost:8502/health`
-
-Endpoint chính:
-
-- `GET /doctors` - tìm bác sĩ
-- `GET /slots` - tìm ca khám còn chỗ
-- `POST /bookings` - đặt lịch khám, yêu cầu `Idempotency-Key`
-- `GET /bookings/{booking_id}` - xem lịch khám
-- `POST /bookings/{booking_id}/cancel` - hủy lịch, yêu cầu `Idempotency-Key`
-- `POST /bookings/{booking_id}/reschedule` - đổi ca, yêu cầu `Idempotency-Key`
+- UI Demo: <http://127.0.0.1:8502/>
+- Deep Link Demo: <http://127.0.0.1:8502/?booking_id=CLB-xxx>
+- Swagger UI: <http://127.0.0.1:8502/docs>
+- Health check: <http://127.0.0.1:8502/health>
+- OpenAPI JSON: <http://127.0.0.1:8502/openapi.json>

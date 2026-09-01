@@ -19,7 +19,8 @@ SLOT_CAPACITY = 2
 app = FastAPI(
     title="Health Booking Mini App",
     version="1.0.0",
-    description="Mini-app demo đặt, đổi và hủy lịch khám; dữ liệu lưu tạm trong bộ nhớ.",
+    description="Mini-app demo tra cứu bác sĩ, đặt, đổi, thanh toán và hủy lịch khám; dữ liệu lưu tạm trong bộ nhớ.",
+    servers=[{"url": "https://healthbooking.onrender.com"}],
 )
 app.add_middleware(
     CORSMiddleware,
@@ -37,11 +38,19 @@ class Customer(BaseModel):
 
 
 class BookingRequest(BaseModel):
-    doctor_id: str = Field(..., description="Mã bác sĩ được chọn")
-    slot_id: str = Field(..., description="Mã ca khám còn chỗ được chọn")
+    doctor_id: str | None = Field(None, description="Mã bác sĩ được chọn (có thể chọn theo doctor_id hoặc doctor_name)")
+    doctor_name: str | None = Field(None, description="Tên bác sĩ (nếu không cung cấp doctor_id)")
+    slot_id: str | None = Field(None, description="Mã ca khám còn chỗ")
+    appointment_date: str | None = Field(None, description="Ngày khám YYYY-MM-DD (nếu không dùng slot_id)")
+    start_time: str | None = Field(None, description="Giờ bắt đầu HH:MM (nếu không dùng slot_id)")
     patient_name: str = Field(..., min_length=2, max_length=100, description="Họ tên người đi khám")
     patient_phone: str = Field(..., min_length=8, max_length=20, description="Số điện thoại liên hệ")
     reason: str = Field(..., min_length=3, max_length=300, description="Lý do hoặc triệu chứng cần khám")
+    customer: Customer | None = Field(None, description="Hồ sơ người dùng do Super App tự đính kèm")
+
+
+class PayRequest(BaseModel):
+    payment_method: str | None = Field("SUPERAPP_PAY", description="Phương thức thanh toán (VD: SUPERAPP_PAY, WALLET, CARD)")
     customer: Customer | None = Field(None, description="Hồ sơ người dùng do Super App tự đính kèm")
 
 
@@ -51,12 +60,15 @@ class CancelRequest(BaseModel):
 
 
 class RescheduleRequest(BaseModel):
-    new_slot_id: str = Field(..., description="Mã ca khám mới còn chỗ của cùng bác sĩ")
+    new_slot_id: str | None = Field(None, description="Mã ca khám mới còn chỗ của cùng bác sĩ")
+    patient_name: str | None = Field(None, min_length=2, max_length=100, description="Cập nhật họ tên người đi khám mới")
+    patient_phone: str | None = Field(None, min_length=8, max_length=20, description="Cập nhật số điện thoại mới")
+    reason: str | None = Field(None, min_length=3, max_length=300, description="Cập nhật lý do hoặc triệu chứng cần khám")
     customer: Customer | None = Field(None, description="Hồ sơ người dùng do Super App tự đính kèm")
 
 
-DOCTORS: dict[str, dict[str, Any]] = {
-    "DOC-NOI-01": {
+DOORS_LIST: list[dict[str, Any]] = [
+    {
         "doctor_id": "DOC-NOI-01",
         "name": "BS. Nguyễn Minh Anh",
         "specialty": "Nội tổng quát",
@@ -64,7 +76,7 @@ DOCTORS: dict[str, dict[str, Any]] = {
         "fee": 250_000,
         "description": "Khám sức khỏe tổng quát, ho, sốt và các triệu chứng thông thường.",
     },
-    "DOC-NHI-01": {
+    {
         "doctor_id": "DOC-NHI-01",
         "name": "BS. Trần Thu Hà",
         "specialty": "Nhi khoa",
@@ -72,7 +84,7 @@ DOCTORS: dict[str, dict[str, Any]] = {
         "fee": 280_000,
         "description": "Khám bệnh cho trẻ em và tư vấn chăm sóc sức khỏe trẻ nhỏ.",
     },
-    "DOC-MAT-01": {
+    {
         "doctor_id": "DOC-MAT-01",
         "name": "BS. Lê Quốc Bảo",
         "specialty": "Mắt",
@@ -80,7 +92,7 @@ DOCTORS: dict[str, dict[str, Any]] = {
         "fee": 300_000,
         "description": "Khám thị lực, đau mắt, khô mắt và tư vấn tật khúc xạ.",
     },
-    "DOC-TMH-01": {
+    {
         "doctor_id": "DOC-TMH-01",
         "name": "BS. Phạm Ngọc Lan",
         "specialty": "Tai Mũi Họng",
@@ -88,15 +100,30 @@ DOCTORS: dict[str, dict[str, Any]] = {
         "fee": 280_000,
         "description": "Khám tai, mũi, họng và các triệu chứng đường hô hấp trên.",
     },
-}
+]
+
+DOCTORS: dict[str, dict[str, Any]] = {d["doctor_id"]: d for d in DOORS_LIST}
 
 SLOTS: dict[str, dict[str, Any]] = {}
 BOOKINGS: dict[str, dict[str, Any]] = {}
 IDEMPOTENCY_RESULTS: dict[str, dict[str, Any]] = {}
 
 
+def find_doctors(doctor_id: str | None = None, name: str | None = None, specialty: str | None = None) -> list[dict[str, Any]]:
+    results = []
+    for doctor in DOCTORS.values():
+        if doctor_id and doctor_id.lower() not in doctor["doctor_id"].lower():
+            continue
+        if name and name.lower() not in doctor["name"].lower():
+            continue
+        if specialty and specialty.lower() not in doctor["specialty"].lower():
+            continue
+        results.append(doctor)
+    return results
+
+
 def envelope(
-    status: Literal["success", "error"],
+    status: Literal["success", "failure"],
     message: str,
     data: Any = None,
     code: str | None = None,
@@ -104,21 +131,26 @@ def envelope(
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"status": status, "message": message}
     if operation_id:
-        result["operation_id"] = operation_id
+        result["operation_id"] = operation_id.lower()
     if data is not None:
         result["data"] = data
     if code:
         result["code"] = code
+        result["error"] = {
+            "code": code,
+            "message": message,
+            "details": data or {},
+        }
     return result
 
 
 def ok(data: Any, message: str, operation_id: str | None = None) -> dict[str, Any]:
-    operation_id = operation_id or f"health-operation-{uuid4().hex[:12].upper()}"
-    return envelope("success", message, data, operation_id=operation_id)
+    operation_id = operation_id or f"health-op-{uuid4().hex[:12].lower()}"
+    return envelope("success", message, data, operation_id=operation_id.lower())
 
 
 def error(message: str, code: str, data: Any = None) -> dict[str, Any]:
-    return envelope("error", message, data, code)
+    return envelope("failure", message, data, code=code)
 
 
 def verify_api_key(value: str | None) -> dict[str, Any] | None:
@@ -159,21 +191,28 @@ def seed_slots() -> None:
 
 def public_slot(slot: dict[str, Any]) -> dict[str, Any]:
     remaining = slot["capacity"] - slot["booked"]
-    return {**slot, "remaining": remaining, "available": remaining > 0}
+    doctor = DOCTORS.get(slot["doctor_id"], {})
+    return {
+        **slot,
+        "doctor_name": doctor.get("name", ""),
+        "specialty": doctor.get("specialty", ""),
+        "remaining": remaining,
+        "available": remaining > 0,
+    }
 
 
 def booking_view(booking: dict[str, Any]) -> dict[str, Any]:
-    doctor = DOCTORS[booking["doctor_id"]]
-    slot = SLOTS[booking["slot_id"]]
+    doctor = DOCTORS.get(booking["doctor_id"], {})
+    slot = SLOTS.get(booking["slot_id"], {})
     return {
         **booking,
-        "doctor_name": doctor["name"],
-        "specialty": doctor["specialty"],
-        "room": doctor["room"],
-        "fee": doctor["fee"],
-        "date": slot["date"],
-        "start_time": slot["start_time"],
-        "end_time": slot["end_time"],
+        "doctor_name": doctor.get("name", ""),
+        "specialty": doctor.get("specialty", ""),
+        "room": doctor.get("room", ""),
+        "fee": doctor.get("fee", 0),
+        "date": slot.get("date", ""),
+        "start_time": slot.get("start_time", ""),
+        "end_time": slot.get("end_time", ""),
     }
 
 
@@ -190,31 +229,202 @@ header{background:linear-gradient(120deg,#087f8c,#05a081);color:white;padding:28
 h1{margin:0 0 6px}.muted{color:#63768d}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
 main{padding:22px;display:grid;gap:18px}.panel,.card{background:white;border:1px solid #dce6ef;border-radius:12px;padding:16px;box-shadow:0 4px 16px #24405b0d}
 .card h3{margin:0 0 6px}.tag{display:inline-block;background:#e6f7f2;color:#08765f;border-radius:20px;padding:4px 9px;font-size:12px;font-weight:700}
+.tag.warning{background:#fff8e6;color:#b7791f}.tag.success{background:#e6fffa;color:#234e52}.tag.danger{background:#ffe3e3;color:#9b1c1c}
 form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end}label{display:grid;gap:6px;font-size:13px;font-weight:700}
-input,select,textarea,button{font:inherit;border:1px solid #bdcad6;border-radius:8px;padding:10px}textarea{min-height:42px}button{background:#078674;color:white;border:0;font-weight:700;cursor:pointer}.danger{background:#c23b3b}.secondary{background:#47637d}
-.actions{display:flex;gap:8px;flex-wrap:wrap}.result{white-space:pre-wrap;background:#12263a;color:#eaf7f5;padding:14px;border-radius:9px;overflow:auto}
-</style></head><body><header><div><h1>Health Booking</h1><span>Mini-app demo đặt lịch khám nhanh</span></div></header><main>
-<section><h2>Bác sĩ</h2><div id="doctors" class="grid"></div></section>
-<section class="panel"><h2>Đặt lịch</h2><form id="bookForm">
-<label>Bác sĩ<select name="doctor_id" id="doctorSelect" required></select></label>
-<label>Ca còn trống<select name="slot_id" id="slotSelect" required></select></label>
-<label>Họ tên<input name="patient_name" value="Nguyễn Văn A" required></label>
-<label>Điện thoại<input name="patient_phone" value="0912345678" required></label>
-<label>Lý do khám<textarea name="reason" required>Khám sức khỏe tổng quát</textarea></label>
-<button type="submit">Đặt lịch</button></form></section>
-<section class="panel"><h2>Lịch vừa thao tác</h2><div id="bookingBox" class="muted">Chưa có lịch khám.</div></section>
-<section><h2>Kết quả API</h2><pre id="result" class="result">Sẵn sàng.</pre></section>
+input,select,textarea,button{font:inherit;border:1px solid #bdcad6;border-radius:8px;padding:10px}textarea{min-height:42px}button{background:#078674;color:white;border:0;font-weight:700;cursor:pointer}.primary{background:#087f8c}.danger{background:#c23b3b}.secondary{background:#47637d}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.result{white-space:pre-wrap;background:#12263a;color:#eaf7f5;padding:14px;border-radius:9px;overflow:auto}
+.search-box{display:flex;gap:10px;margin-bottom:12px}
+.pay-banner{background:#fff8e6;border:1px solid #f6e05e;padding:12px;border-radius:8px;margin:10px 0;display:flex;align-items:center;justify-content:space-between;gap:10px}
+</style></head><body><header><div><h1>Health Booking</h1><span>Mini-app demo đặt, đổi, thanh toán và hủy lịch khám</span></div></header><main>
+<section class="panel">
+  <h2>1. Tìm bác sĩ (Theo tên hoặc ID)</h2>
+  <div class="search-box">
+    <input id="docQuery" placeholder="Nhập tên hoặc mã bác sĩ (VD: Anh, DOC-NOI-01)">
+    <button type="button" onclick="searchDoctor()">Tìm kiếm</button>
+    <button type="button" class="secondary" onclick="loadDoctors()">Tất cả</button>
+  </div>
+  <div id="doctors" class="grid"></div>
+</section>
+
+<section class="panel">
+  <h2>2. Tìm lịch/ca khám (Theo tên hoặc ID bác sĩ)</h2>
+  <div class="search-box">
+    <input id="slotDocQuery" placeholder="Nhập tên hoặc ID bác sĩ để xem lịch">
+    <button type="button" onclick="searchSlotsByDoc()">Xem lịch khám</button>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>3. Đặt lịch khám</h2>
+  <form id="bookForm">
+    <label>Bác sĩ<select name="doctor_id" id="doctorSelect" required></select></label>
+    <label>Ca còn trống<select name="slot_id" id="slotSelect" required></select></label>
+    <label>Họ tên<input name="patient_name" value="Nguyễn Văn A" required></label>
+    <label>Điện thoại<input name="patient_phone" value="0912345678" required></label>
+    <label>Lý do khám<textarea name="reason" required>Khám sức khỏe tổng quát</textarea></label>
+    <button type="submit">Đặt lịch khám</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>4. Giao diện Deep Link / Lịch khám & Thanh toán</h2>
+  <div id="bookingBox" class="muted">Chưa có lịch khám.</div>
+</section>
+
+<section class="panel">
+  <h2>5. Tra cứu lịch khám đã đặt</h2>
+  <div class="search-box">
+    <input id="searchBookingId" placeholder="Nhập mã lịch (CLB-...) hoặc SĐT">
+    <button type="button" onclick="searchBooking()">Tra cứu</button>
+  </div>
+</section>
+
+<section>
+  <h2>Kết quả API</h2>
+  <pre id="result" class="result">Sẵn sàng.</pre>
+</section>
 </main><script>
 const state={booking:null};const result=document.querySelector('#result');const doctorSelect=document.querySelector('#doctorSelect');const slotSelect=document.querySelector('#slotSelect');
 async function api(url,options){const res=await fetch(url,options);const body=await res.json();const method=(options?.method||'GET').toUpperCase();if(method!=='GET')result.textContent=JSON.stringify(body,null,2);return body}
-async function loadDoctors(){const body=await api('/doctors');const ds=body.data.doctors;doctorSelect.innerHTML=ds.map(d=>`<option value="${d.doctor_id}">${d.name} — ${d.specialty}</option>`).join('');document.querySelector('#doctors').innerHTML=ds.map(d=>`<article class="card"><span class="tag">${d.specialty}</span><h3>${d.name}</h3><p>${d.description}</p><p class="muted">${d.room} · ${d.fee.toLocaleString('vi-VN')}đ</p></article>`).join('');await loadSlots()}
-async function loadSlots(){const body=await api(`/slots?doctor_id=${encodeURIComponent(doctorSelect.value)}&available_only=true`);slotSelect.innerHTML=body.data.slots.map(s=>`<option value="${s.slot_id}">${s.date} · ${s.start_time}–${s.end_time} · còn ${s.remaining}</option>`).join('')||'<option value="">Không còn ca trống</option>'}
-function renderBooking(){if(!state.booking){document.querySelector('#bookingBox').innerHTML='Chưa có lịch khám.';return}const b=state.booking;document.querySelector('#bookingBox').innerHTML=`<div class="card"><h3>${b.doctor_name}</h3><p>${b.specialty} · ${b.date} · ${b.start_time}–${b.end_time}</p><p><b>${b.patient_name}</b> — ${b.status}</p><div class="actions"><button class="secondary" onclick="reschedule()">Đổi sang ca đang chọn</button><button class="danger" onclick="cancelBooking()">Hủy lịch</button></div></div>`}
-document.querySelector('#bookForm').addEventListener('submit',async e=>{e.preventDefault();const payload=Object.fromEntries(new FormData(e.target).entries());const body=await api('/bookings',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(payload)});if(body.status==='success'){state.booking=body.data.booking;renderBooking();await loadSlots()}})
-async function cancelBooking(){if(!state.booking||!confirm('Bạn muốn hủy lịch này?'))return;const body=await api(`/bookings/${state.booking.booking_id}/cancel`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({reason:'Người dùng hủy trên giao diện demo'})});if(body.status==='success'){state.booking=body.data.booking;renderBooking();await loadSlots()}}
-async function reschedule(){if(!state.booking||!slotSelect.value)return;const body=await api(`/bookings/${state.booking.booking_id}/reschedule`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({new_slot_id:slotSelect.value})});if(body.status==='success'){state.booking=body.data.booking;renderBooking();await loadSlots()}}
-async function loadBookingFromQuery(){const bookingId=new URLSearchParams(window.location.search).get('booking_id');if(!bookingId||bookingId.includes('{'))return;const body=await api(`/bookings/${encodeURIComponent(bookingId)}`);if(body.status!=='success'||!body.data?.booking)return;state.booking=body.data.booking;renderBooking();doctorSelect.value=state.booking.doctor_id;await loadSlots();slotSelect.value=state.booking.slot_id}
-doctorSelect.addEventListener('change',loadSlots);loadDoctors().then(loadBookingFromQuery);
+
+async function renderDoctorList(ds){
+  doctorSelect.innerHTML=ds.map(d=>`<option value="${d.doctor_id}">${d.name} — ${d.specialty}</option>`).join('');
+  document.querySelector('#doctors').innerHTML=ds.map(d=>`<article class="card"><span class="tag">${d.specialty}</span><h3>${d.name}</h3><p><b>ID:</b> ${d.doctor_id}</p><p>${d.description}</p><p class="muted">${d.room} · ${d.fee.toLocaleString('vi-VN')}đ</p></article>`).join('');
+  await loadSlots();
+}
+
+async function loadDoctors(){
+  const body=await api('/doctors');
+  if(body.status==='success') renderDoctorList(body.data.doctors);
+}
+
+async function searchDoctor(){
+  const q=document.querySelector('#docQuery').value.trim();
+  if(!q){ loadDoctors(); return; }
+  const body=await api(`/doctors?name=${encodeURIComponent(q)}`);
+  let ds=body.data?.doctors||[];
+  if(!ds.length){
+    const idBody=await api(`/doctors?doctor_id=${encodeURIComponent(q)}`);
+    ds=idBody.data?.doctors||[];
+  }
+  renderDoctorList(ds);
+}
+
+async function searchSlotsByDoc(){
+  const q=document.querySelector('#slotDocQuery').value.trim();
+  if(!q) return;
+  const body=await api(`/slots?doctor_name=${encodeURIComponent(q)}&available_only=true`);
+  result.textContent=JSON.stringify(body,null,2);
+  if(body.status==='success'&&body.data.slots.length){
+    doctorSelect.value=body.data.slots[0].doctor_id;
+    await loadSlots();
+  }
+}
+
+async function loadSlots(){
+  const body=await api(`/slots?doctor_id=${encodeURIComponent(doctorSelect.value)}&available_only=true`);
+  slotSelect.innerHTML=body.data.slots.map(s=>`<option value="${s.slot_id}">${s.date} · ${s.start_time}–${s.end_time} · còn ${s.remaining}</option>`).join('')||'<option value="">Không còn ca trống</option>';
+}
+
+function renderBooking(){
+  if(!state.booking){document.querySelector('#bookingBox').innerHTML='Chưa có lịch khám.';return}
+  const b=state.booking;
+  const isUnpaid = b.status === 'PENDING_PAYMENT';
+  const isPaid = b.status === 'PAID';
+
+  let statusBadge = `<span class="tag">${b.status}</span>`;
+  if (isUnpaid) statusBadge = `<span class="tag warning">Đặt thành công - Chưa thanh toán</span>`;
+  if (isPaid) statusBadge = `<span class="tag success">Thanh toán thành công</span>`;
+  if (b.status === 'CANCELLED') statusBadge = `<span class="tag danger">Đã hủy lịch</span>`;
+
+  let payHtml = '';
+  if (isUnpaid) {
+    payHtml = `<div class="pay-banner">
+      <div><b>Trạng thái:</b> Đặt lịch thành công nhưng chưa thanh toán. Vui lòng hoàn tất thanh toán (${b.fee?.toLocaleString('vi-VN')}đ).</div>
+      <button class="primary" onclick="payBooking()">Thanh toán ngay</button>
+    </div>`;
+  } else if (isPaid) {
+    payHtml = `<div class="pay-banner" style="background:#e6fffa;border-color:#319795">
+      <div><b>Đã thanh toán thành công!</b> Mã giao dịch xác nhận: ${b.booking_id}</div>
+    </div>`;
+  }
+
+  document.querySelector('#bookingBox').innerHTML=`<div class="card">
+    <h3>Mã Lịch Khám: ${b.booking_id}</h3>
+    <p><b>Trạng thái:</b> ${statusBadge}</p>
+    <p><b>Bác sĩ:</b> ${b.doctor_name} (${b.specialty})</p>
+    <p><b>Thời gian:</b> ${b.date} · ${b.start_time}–${b.end_time} (${b.room})</p>
+    <p><b>Bệnh nhân:</b> ${b.patient_name} — ${b.patient_phone}</p>
+    <p><b>Phí khám:</b> ${b.fee?.toLocaleString('vi-VN')} VNĐ</p>
+    <p><b>Lý do:</b> ${b.reason}</p>
+    ${payHtml}
+    ${b.status!=='CANCELLED'?`<div class="actions">
+      ${isUnpaid ? `<button class="primary" onclick="payBooking()">Thanh toán ngay</button>` : ''}
+      <button class="secondary" onclick="updateBookingInfo()">Đổi ca / Đổi thông tin</button>
+      <button class="danger" onclick="cancelBooking()">Hủy lịch</button>
+    </div>`:''}
+  </div>`;
+}
+
+document.querySelector('#bookForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const payload=Object.fromEntries(new FormData(e.target).entries());
+  const body=await api('/bookings',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(payload)});
+  if(body.status==='success'){state.booking=body.data.booking;renderBooking();await loadSlots();}
+});
+
+async function payBooking(){
+  if(!state.booking) return;
+  const body=await api(`/bookings/${state.booking.booking_id}/pay`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({payment_method:'SUPERAPP_PAY'})});
+  if(body.status==='success'){state.booking=body.data.booking;renderBooking();}
+}
+
+async function cancelBooking(){
+  if(!state.booking||!confirm('Bạn muốn hủy lịch này?'))return;
+  const body=await api(`/bookings/${state.booking.booking_id}/cancel`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({reason:'Người dùng hủy trên giao diện demo'})});
+  if(body.status==='success'){state.booking=body.data.booking;renderBooking();await loadSlots();}
+}
+
+async function updateBookingInfo(){
+  if(!state.booking) return;
+  const newName=prompt("Họ tên mới (bỏ trống nếu không đổi):", state.booking.patient_name);
+  const newPhone=prompt("SĐT mới (bỏ trống nếu không đổi):", state.booking.patient_phone);
+  const newReason=prompt("Lý do khám mới (bỏ trống nếu không đổi):", state.booking.reason);
+  const changeSlot=confirm("Bạn có muốn chuyển sang ca đang chọn ở form bên trên không?");
+  const payload={};
+  if(newName) payload.patient_name=newName;
+  if(newPhone) payload.patient_phone=newPhone;
+  if(newReason) payload.reason=newReason;
+  if(changeSlot && slotSelect.value) payload.new_slot_id=slotSelect.value;
+  
+  const body=await api(`/bookings/${state.booking.booking_id}/reschedule`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify(payload)});
+  if(body.status==='success'){state.booking=body.data.booking;renderBooking();await loadSlots();}
+}
+
+async function searchBooking(){
+  const q=document.querySelector('#searchBookingId').value.trim();
+  if(!q) return;
+  let body=await api(`/bookings/${encodeURIComponent(q)}`);
+  if(body.status!=='success'){
+    body=await api(`/bookings?patient_phone=${encodeURIComponent(q)}`);
+  }
+  result.textContent=JSON.stringify(body,null,2);
+  if(body.status==='success'){
+    const b=body.data.booking || (body.data.bookings && body.data.bookings[0]);
+    if(b){ state.booking=b; renderBooking(); }
+  }
+}
+
+async function loadBookingFromQuery(){
+  const bookingId=new URLSearchParams(window.location.search).get('booking_id');
+  if(!bookingId||bookingId.includes('{'))return;
+  const body=await api(`/bookings/${encodeURIComponent(bookingId)}`);
+  if(body.status!=='success'||!body.data?.booking)return;
+  state.booking=body.data.booking;renderBooking();doctorSelect.value=state.booking.doctor_id;await loadSlots();slotSelect.value=state.booking.slot_id;
+}
+
+doctorSelect.addEventListener('change',loadSlots);
+loadDoctors().then(loadBookingFromQuery);
 </script></body></html>'''
 
 
@@ -223,35 +433,53 @@ async def health() -> dict[str, Any]:
     return ok({"service_code": SERVICE_CODE, "storage": "memory", "status": "ok", "time": datetime.now(timezone.utc).isoformat()}, "Health Booking đang hoạt động")
 
 
-@app.get("/doctors", operation_id="list_clinic_doctors", summary="Tìm bác sĩ theo chuyên khoa", description="Dùng khi người dùng muốn xem hoặc tìm bác sĩ phù hợp.", openapi_extra={"x-risk-level": "low", "x-side-effect-type": "read"})
-async def list_doctors(specialty: str | None = Query(None, description="Chuyên khoa cần tìm, ví dụ: Nội tổng quát, Nhi khoa, Mắt, Tai Mũi Họng")) -> dict[str, Any]:
-    doctors = [doctor for doctor in DOCTORS.values() if not specialty or specialty.lower() in doctor["specialty"].lower()]
-    return ok({"doctors": doctors, "count": len(doctors)}, "Lấy danh sách bác sĩ thành công")
+@app.get("/doctors", operation_id="list_clinic_doctors", summary="Lấy thông tin bác sĩ theo ID, tên hoặc chuyên khoa", description="Chức năng 1: Lấy tên/ID theo ID hoặc tên bác sĩ hoặc chuyên khoa.", openapi_extra={"x-risk-level": "low", "x-side-effect-type": "read"})
+async def list_doctors(
+    doctor_id: str | None = Query(None, description="Mã bác sĩ cần tìm (VD: DOC-NOI-01)"),
+    name: str | None = Query(None, description="Tên bác sĩ cần tìm (VD: Nguyễn Minh Anh hoặc Minh Anh)"),
+    specialty: str | None = Query(None, description="Chuyên khoa cần tìm (VD: Nội tổng quát, Nhi khoa, Mắt, Tai Mũi Họng)"),
+) -> dict[str, Any]:
+    matched = find_doctors(doctor_id=doctor_id, name=name, specialty=specialty)
+    return ok({"doctors": matched, "count": len(matched)}, "Lấy danh sách bác sĩ thành công")
 
 
-@app.get("/slots", operation_id="search_clinic_slots", summary="Tìm ca khám còn chỗ", description="Dùng khi người dùng đã chọn bác sĩ hoặc ngày khám và muốn xem ca còn trống.", openapi_extra={"x-risk-level": "low", "x-side-effect-type": "read"})
+@app.get("/slots", operation_id="search_clinic_slots", summary="Lấy ra lịch khám của bác sĩ theo ID hoặc tên bác sĩ", description="Chức năng 2: Lấy ra lịch khám của 1 bác sĩ theo ID hoặc theo tên bác sĩ.", openapi_extra={"x-risk-level": "low", "x-side-effect-type": "read"})
 async def list_slots(
-    doctor_id: str | None = Query(None, description="Mã bác sĩ cần xem lịch"),
+    doctor_id: str | None = Query(None, description="Mã bác sĩ cần xem lịch (VD: DOC-NOI-01)"),
+    doctor_name: str | None = Query(None, description="Tên bác sĩ cần xem lịch (VD: BS. Nguyễn Minh Anh hoặc Minh Anh)"),
     appointment_date: date | None = Query(None, description="Ngày muốn khám theo định dạng YYYY-MM-DD"),
     available_only: bool = Query(True, description="Chỉ trả về ca còn chỗ"),
 ) -> dict[str, Any]:
-    if doctor_id and doctor_id not in DOCTORS:
-        return error("Không tìm thấy bác sĩ", "DOCTOR_NOT_FOUND", {"doctor_id": doctor_id})
+    target_doctor_ids: set[str] = set()
+
+    if doctor_id:
+        if doctor_id not in DOCTORS:
+            return error(f"Không tìm thấy bác sĩ với ID '{doctor_id}'", "DOCTOR_NOT_FOUND", {"doctor_id": doctor_id})
+        target_doctor_ids.add(doctor_id)
+
+    if doctor_name:
+        matched_docs = find_doctors(name=doctor_name)
+        if not matched_docs:
+            return error(f"Không tìm thấy bác sĩ với tên '{doctor_name}'", "DOCTOR_NOT_FOUND", {"doctor_name": doctor_name})
+        for d in matched_docs:
+            target_doctor_ids.add(d["doctor_id"])
+
     slots = []
     for slot in SLOTS.values():
         item = public_slot(slot)
-        if doctor_id and slot["doctor_id"] != doctor_id:
+        if target_doctor_ids and slot["doctor_id"] not in target_doctor_ids:
             continue
         if appointment_date and slot["date"] != appointment_date.isoformat():
             continue
         if available_only and not item["available"]:
             continue
         slots.append(item)
+
     slots.sort(key=lambda item: (item["date"], item["start_time"], item["doctor_id"]))
     return ok({"slots": slots, "count": len(slots)}, "Lấy danh sách ca khám thành công")
 
 
-@app.post("/bookings", operation_id="create_clinic_booking", summary="Đặt lịch khám sau khi người dùng xác nhận", description="Dùng khi người dùng đã chọn bác sĩ, ca khám và cung cấp thông tin bệnh nhân.", openapi_extra={"x-risk-level": "high", "x-side-effect-type": "mutation", "x-requires-hitl": True, "x-idempotency-required": True, "x-retry-policy": "no_retry", "x-deep-link-template": f"{PUBLIC_BASE_URL}/?booking_id={{booking_id}}"})
+@app.post("/bookings", operation_id="create_clinic_booking", summary="Đặt lịch khám theo bác sĩ (Khởi tạo trạng thái Chờ thanh toán)", description="Chức năng 3: Đặt lịch khám theo ID/tên bác sĩ và ca khám. Ban đầu trạng thái là PENDING_PAYMENT (Đặt thành công - Chưa thanh toán).", openapi_extra={"x-risk-level": "high", "x-side-effect-type": "mutation", "x-requires-hitl": True, "x-idempotency-required": True, "x-retry-policy": "no_retry", "x-deep-link-template": f"{PUBLIC_BASE_URL}/?booking_id={{booking_id}}"})
 async def create_booking(payload: BookingRequest, idempotency_key: str | None = Header(None, alias="Idempotency-Key"), x_api_key: str | None = Header(None, alias="x-api-key")) -> dict[str, Any]:
     if key_error := verify_api_key(x_api_key):
         return key_error
@@ -259,37 +487,108 @@ async def create_booking(payload: BookingRequest, idempotency_key: str | None = 
         return idem_error
     if idempotency_key in IDEMPOTENCY_RESULTS:
         return IDEMPOTENCY_RESULTS[idempotency_key]
-    doctor = DOCTORS.get(payload.doctor_id)
-    slot = SLOTS.get(payload.slot_id)
-    if not doctor:
-        return error("Không tìm thấy bác sĩ", "DOCTOR_NOT_FOUND")
-    if not slot or slot["doctor_id"] != payload.doctor_id:
-        return error("Ca khám không thuộc bác sĩ đã chọn", "INVALID_SLOT")
-    if slot["booked"] >= slot["capacity"]:
-        return error("Ca khám đã hết chỗ", "SLOT_FULL", public_slot(slot))
+
+    # Resolve doctor
+    target_doctor: dict[str, Any] | None = None
+    if payload.doctor_id:
+        target_doctor = DOCTORS.get(payload.doctor_id)
+    elif payload.doctor_name:
+        matched = find_doctors(name=payload.doctor_name)
+        if matched:
+            target_doctor = matched[0]
+
+    if not target_doctor:
+        return error("Không tìm thấy bác sĩ phù hợp", "DOCTOR_NOT_FOUND")
+
+    doctor_id = target_doctor["doctor_id"]
+
+    # Resolve slot
+    target_slot: dict[str, Any] | None = None
+    if payload.slot_id:
+        target_slot = SLOTS.get(payload.slot_id)
+    elif payload.appointment_date and payload.start_time:
+        for slot in SLOTS.values():
+            if slot["doctor_id"] == doctor_id and slot["date"] == payload.appointment_date and slot["start_time"] == payload.start_time:
+                target_slot = slot
+                break
+
+    if not target_slot or target_slot["doctor_id"] != doctor_id:
+        return error("Ca khám không hợp lệ hoặc không thuộc bác sĩ đã chọn", "INVALID_SLOT")
+
+    if target_slot["booked"] >= target_slot["capacity"]:
+        return error("Ca khám đã hết chỗ", "SLOT_FULL", public_slot(target_slot))
+
     booking_id = f"CLB-{uuid4().hex[:8].upper()}"
     booking = {
         "booking_id": booking_id,
-        "doctor_id": payload.doctor_id,
-        "slot_id": payload.slot_id,
+        "doctor_id": doctor_id,
+        "slot_id": target_slot["slot_id"],
         "patient_name": payload.patient_name,
         "patient_phone": payload.patient_phone,
         "reason": payload.reason,
-        "status": "CONFIRMED",
+        "status": "PENDING_PAYMENT",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     BOOKINGS[booking_id] = booking
-    slot["booked"] += 1
+    target_slot["booked"] += 1
+
     response = ok(
         {"booking": booking_view(booking)},
-        "Đặt lịch khám thành công",
-        operation_id=f"booking-{booking_id}",
+        "Đặt lịch khám thành công (Chờ thanh toán)",
+        operation_id=f"health-booking-{booking_id.lower()}",
     )
     IDEMPOTENCY_RESULTS[idempotency_key] = response
     return response
 
 
-@app.get("/bookings/{booking_id}", operation_id="get_clinic_booking", summary="Xem thông tin lịch khám", description="Dùng khi người dùng muốn kiểm tra lịch khám đã đặt.", openapi_extra={"x-risk-level": "low", "x-side-effect-type": "read"})
+@app.post("/bookings/{booking_id}/pay", operation_id="pay_clinic_booking", summary="Xác nhận thanh toán cho lịch khám", description="Dùng khi người dùng ấn nút thanh toán hoặc khi nhận callback/thông báo thanh toán thành công từ Super App.", openapi_extra={"x-risk-level": "high", "x-side-effect-type": "mutation", "x-requires-hitl": True, "x-idempotency-required": True, "x-retry-policy": "no_retry"})
+async def pay_booking(payload: PayRequest, booking_id: str = Path(..., description="Mã lịch khám cần thanh toán"), idempotency_key: str | None = Header(None, alias="Idempotency-Key"), x_api_key: str | None = Header(None, alias="x-api-key")) -> dict[str, Any]:
+    if key_error := verify_api_key(x_api_key):
+        return key_error
+    if idem_error := require_idempotency(idempotency_key):
+        return idem_error
+    cache_key = f"pay:{idempotency_key}"
+    if cache_key in IDEMPOTENCY_RESULTS:
+        return IDEMPOTENCY_RESULTS[cache_key]
+
+    booking = BOOKINGS.get(booking_id)
+    if not booking:
+        return error("Không tìm thấy lịch khám", "BOOKING_NOT_FOUND")
+    if booking["status"] == "CANCELLED":
+        return error("Lịch khám đã hủy, không thể thanh toán", "BOOKING_CANCELLED")
+
+    booking["status"] = "PAID"
+    booking["payment_method"] = payload.payment_method or "SUPERAPP_PAY"
+    booking["paid_at"] = datetime.now(timezone.utc).isoformat()
+
+    response = ok(
+        {"booking": booking_view(booking)},
+        "Thanh toán lịch khám thành công",
+        operation_id=f"health-payment-{booking_id.lower()}",
+    )
+    IDEMPOTENCY_RESULTS[cache_key] = response
+    return response
+
+
+@app.get("/bookings", operation_id="search_clinic_bookings", summary="Tìm kiếm thông tin lịch khám bệnh", description="Chức năng 6: Lấy danh sách hoặc tìm kiếm lịch khám theo SĐT, tên bệnh nhân hoặc ID bác sĩ.", openapi_extra={"x-risk-level": "low", "x-side-effect-type": "read"})
+async def list_bookings(
+    patient_phone: str | None = Query(None, description="Số điện thoại bệnh nhân"),
+    patient_name: str | None = Query(None, description="Tên bệnh nhân"),
+    doctor_id: str | None = Query(None, description="Mã bác sĩ"),
+) -> dict[str, Any]:
+    matched = []
+    for booking in BOOKINGS.values():
+        if patient_phone and patient_phone not in booking["patient_phone"]:
+            continue
+        if patient_name and patient_name.lower() not in booking["patient_name"].lower():
+            continue
+        if doctor_id and booking["doctor_id"] != doctor_id:
+            continue
+        matched.append(booking_view(booking))
+    return ok({"bookings": matched, "count": len(matched)}, "Lấy danh sách lịch khám thành công")
+
+
+@app.get("/bookings/{booking_id}", operation_id="get_clinic_booking", summary="Xem thông tin chi tiết lịch khám bệnh", description="Chức năng 6: Lấy thông tin lịch khám bệnh theo mã lịch khám.", openapi_extra={"x-risk-level": "low", "x-side-effect-type": "read"})
 async def get_booking(booking_id: str = Path(..., description="Mã lịch khám cần xem")) -> dict[str, Any]:
     booking = BOOKINGS.get(booking_id)
     if not booking:
@@ -297,7 +596,7 @@ async def get_booking(booking_id: str = Path(..., description="Mã lịch khám 
     return ok({"booking": booking_view(booking)}, "Lấy lịch khám thành công")
 
 
-@app.post("/bookings/{booking_id}/cancel", operation_id="cancel_clinic_booking", summary="Hủy lịch khám sau khi người dùng xác nhận", description="Dùng khi người dùng muốn hủy lịch khám đã đặt.", openapi_extra={"x-risk-level": "high", "x-side-effect-type": "mutation", "x-requires-hitl": True, "x-idempotency-required": True, "x-retry-policy": "no_retry"})
+@app.post("/bookings/{booking_id}/cancel", operation_id="cancel_clinic_booking", summary="Hủy lịch khám", description="Chức năng 5: Hủy lịch khám đã đặt.", openapi_extra={"x-risk-level": "high", "x-side-effect-type": "mutation", "x-requires-hitl": True, "x-idempotency-required": True, "x-retry-policy": "no_retry"})
 async def cancel_booking(payload: CancelRequest, booking_id: str = Path(..., description="Mã lịch khám cần hủy"), idempotency_key: str | None = Header(None, alias="Idempotency-Key"), x_api_key: str | None = Header(None, alias="x-api-key")) -> dict[str, Any]:
     if key_error := verify_api_key(x_api_key):
         return key_error
@@ -306,22 +605,25 @@ async def cancel_booking(payload: CancelRequest, booking_id: str = Path(..., des
     cache_key = f"cancel:{idempotency_key}"
     if cache_key in IDEMPOTENCY_RESULTS:
         return IDEMPOTENCY_RESULTS[cache_key]
+
     booking = BOOKINGS.get(booking_id)
     if not booking:
         return error("Không tìm thấy lịch khám", "BOOKING_NOT_FOUND")
     if booking["status"] != "CANCELLED":
-        SLOTS[booking["slot_id"]]["booked"] -= 1
+        if booking["slot_id"] in SLOTS:
+            SLOTS[booking["slot_id"]]["booked"] -= 1
         booking.update(status="CANCELLED", cancel_reason=payload.reason, cancelled_at=datetime.now(timezone.utc).isoformat())
+
     response = ok(
         {"booking": booking_view(booking)},
         "Hủy lịch khám thành công",
-        operation_id=f"booking-{booking_id}",
+        operation_id=f"health-booking-{booking_id.lower()}",
     )
     IDEMPOTENCY_RESULTS[cache_key] = response
     return response
 
 
-@app.post("/bookings/{booking_id}/reschedule", operation_id="reschedule_clinic_booking", summary="Đổi ca khám sau khi người dùng xác nhận", description="Dùng khi người dùng muốn chuyển lịch hiện tại sang một ca khác của cùng bác sĩ.", openapi_extra={"x-risk-level": "high", "x-side-effect-type": "mutation", "x-requires-hitl": True, "x-idempotency-required": True, "x-retry-policy": "no_retry"})
+@app.post("/bookings/{booking_id}/reschedule", operation_id="reschedule_clinic_booking", summary="Đổi thông tin và ca khám của lịch khám", description="Chức năng 4: Đổi ca khám hoặc đổi thông tin bệnh nhân/lý do của lịch khám.", openapi_extra={"x-risk-level": "high", "x-side-effect-type": "mutation", "x-requires-hitl": True, "x-idempotency-required": True, "x-retry-policy": "no_retry"})
 async def reschedule_booking(payload: RescheduleRequest, booking_id: str = Path(..., description="Mã lịch khám cần đổi"), idempotency_key: str | None = Header(None, alias="Idempotency-Key"), x_api_key: str | None = Header(None, alias="x-api-key")) -> dict[str, Any]:
     if key_error := verify_api_key(x_api_key):
         return key_error
@@ -330,24 +632,39 @@ async def reschedule_booking(payload: RescheduleRequest, booking_id: str = Path(
     cache_key = f"reschedule:{idempotency_key}"
     if cache_key in IDEMPOTENCY_RESULTS:
         return IDEMPOTENCY_RESULTS[cache_key]
+
     booking = BOOKINGS.get(booking_id)
-    new_slot = SLOTS.get(payload.new_slot_id)
     if not booking:
         return error("Không tìm thấy lịch khám", "BOOKING_NOT_FOUND")
     if booking["status"] == "CANCELLED":
         return error("Không thể đổi một lịch đã hủy", "BOOKING_CANCELLED")
-    if not new_slot or new_slot["doctor_id"] != booking["doctor_id"]:
-        return error("Ca mới phải thuộc cùng bác sĩ", "INVALID_NEW_SLOT")
-    if new_slot["booked"] >= new_slot["capacity"]:
-        return error("Ca khám mới đã hết chỗ", "SLOT_FULL", public_slot(new_slot))
-    if payload.new_slot_id != booking["slot_id"]:
-        SLOTS[booking["slot_id"]]["booked"] -= 1
-        new_slot["booked"] += 1
-        booking.update(slot_id=payload.new_slot_id, rescheduled_at=datetime.now(timezone.utc).isoformat())
+
+    # Update slot if provided
+    if payload.new_slot_id:
+        new_slot = SLOTS.get(payload.new_slot_id)
+        if not new_slot or new_slot["doctor_id"] != booking["doctor_id"]:
+            return error("Ca mới phải thuộc cùng bác sĩ", "INVALID_NEW_SLOT")
+        if payload.new_slot_id != booking["slot_id"]:
+            if new_slot["booked"] >= new_slot["capacity"]:
+                return error("Ca khám mới đã hết chỗ", "SLOT_FULL", public_slot(new_slot))
+            SLOTS[booking["slot_id"]]["booked"] -= 1
+            new_slot["booked"] += 1
+            booking["slot_id"] = payload.new_slot_id
+
+    # Update patient details if provided
+    if payload.patient_name:
+        booking["patient_name"] = payload.patient_name
+    if payload.patient_phone:
+        booking["patient_phone"] = payload.patient_phone
+    if payload.reason:
+        booking["reason"] = payload.reason
+
+    booking["rescheduled_at"] = datetime.now(timezone.utc).isoformat()
+
     response = ok(
         {"booking": booking_view(booking)},
-        "Đổi ca khám thành công",
-        operation_id=f"booking-{booking_id}",
+        "Đổi thông tin lịch khám thành công",
+        operation_id=f"health-booking-{booking_id.lower()}",
     )
     IDEMPOTENCY_RESULTS[cache_key] = response
     return response
